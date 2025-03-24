@@ -66,10 +66,11 @@ def quat_conj(q):
     Returns:
         qc: quaternion conjugate
     """
-    qc = q
+    qc = q.copy()
     qc[1] = -q[1]
     qc[2] = -q[2]
     qc[3] = -q[3]
+    return qc
 
 def quat_multiply(q1, q2):
     """
@@ -423,7 +424,7 @@ def euler2dcm(angles, rot_seq='zyx'):
         dcm[2, 1] = -sangle[1]*cangle[2]
         dcm[2, 2] = cangle[0]*cangle[2]*cangle[1] - sangle[0]*sangle[2]
         return dcm
-    elif rot_seq == 'yxz':
+    elif rot_seq == 'yzx':
         dcm[0, 0] = cangle[0]*cangle[1]
         dcm[0, 1] = sangle[1]
         dcm[0, 2] = -sangle[0]*cangle[1]

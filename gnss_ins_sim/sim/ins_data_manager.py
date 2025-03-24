@@ -67,12 +67,15 @@ class InsDataMgr(object):
         # reference data
         self.time = Sim_data(name='time',\
                              description='sample time',\
-                             units=['sec'])
+                             units=['sec'],\
+                             legend=['time'])
         self.gps_time = Sim_data(name='gps_time',\
                                  description='GPS sample time',\
-                                 units=['sec'])
+                                 units=['sec'],\
+                                 legend=['gps_time'])
         self.gps_visibility = Sim_data(name='gps_visibility',\
-                                       description='GPS visibility')
+                                       description='GPS visibility',\
+                                       legend=['gps_visibility'])
         self.ref_pos = Sim_data(name='ref_pos',\
                                 description='true LLA pos in the navigation frame',\
                                 units=['rad', 'rad', 'm'],\
@@ -131,9 +134,9 @@ class InsDataMgr(object):
                             legend=['gps_lat', 'gps_lon', 'gps_alt',\
                                     'gps_vN', 'gps_vE', 'gps_vD'])
         self.odo = Sim_data(name='odo',\
-                                description='odometer velocity measurement',\
-                                units=['m/s'],\
-                                legend=['odo'])
+                            description='odometer velocity measurement',\
+                            units=['m/s'],\
+                            legend=['odo'])
         self.mag = Sim_data(name='mag',\
                             description='magnetometer measurements',\
                             units=['uT', 'uT', 'uT'],\
@@ -193,7 +196,7 @@ class InsDataMgr(object):
         self.ad_gyro = Sim_data(name='ad_gyro',\
                                 description='Allan deviation of gyro',\
                                 units=['rad/s', 'rad/s', 'rad/s'],\
-                                output_units=['deg/hr', 'deg/hr', 'deg/hr'],\
+                                output_units=['deg/s', 'deg/s', 'deg/s'],\
                                 logx=True, logy=True,\
                                 legend=['AD_wx', 'AD_wy', 'AD_wz'])
         self.ad_accel = Sim_data(name='ad_accel',\
@@ -363,6 +366,21 @@ class InsDataMgr(object):
             return self.__all[data_name]
         else:
             return None
+
+    def get_data_properties(self, data_name):
+        '''
+        Get the properties of the data specified by data_name.
+        Args:
+            data_name: a string to specify the data
+        Returns:
+            [description, units, plottable, logx, logy, legend]
+        '''
+        return [self.__all[data_name].description,\
+                self.__all[data_name].units,\
+                self.__all[data_name].plottable,\
+                self.__all[data_name].logx,\
+                self.__all[data_name].logy,\
+                self.__all[data_name].legend]
 
     def get_error_stats(self, data_name, err_stats_start=0, angle=False,\
                        use_output_units=False, extra_opt=''):
@@ -612,6 +630,12 @@ class InsDataMgr(object):
             # print(list(self.supported_plot.keys()))
             # raise ValueError("Unsupported data to plot: %s."%data)
 
+    def show_plot(self):
+        '''
+        Show all plots
+        '''
+        sim_data.show_plot()
+
     def save_kml_files(self, data_dir):
         '''
         generate kml files from reference position and simulation position.
@@ -674,6 +698,21 @@ class InsDataMgr(object):
         Tell if this set of data is supported or not
         '''
         return data_name in self.__all.keys()
+
+    def is_available(self, data_name, key=None):
+        '''
+        Tell if data_name is available. If key is not None, further tell if data in data_name
+        has the key.
+        '''
+        # if data_name is available
+        rtn = data_name in self.available
+        # if data_name has key
+        if rtn and key is not None:
+            if isinstance(self.__all[data_name].data, dict):
+                rtn = key in self.__all[data_name].data.keys()
+            else:
+                rtn = False
+        return rtn
 
     def __end_point_error_stats(self, data_name, group=True):
         '''

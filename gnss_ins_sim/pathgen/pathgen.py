@@ -176,7 +176,7 @@ def path_gen(ini_pos_vel_att, motion_def, output_def, mobility, ref_frame=0, mag
     idx_low_freq = 0        # data index for gps, odo
     for i in range(0, motion_def.shape[0]):
         com_type = round(motion_def[i, 0])      # command type of this segment
-        gps_visibility = motion_def[i, 8]       # gps visibility       
+        gps_visibility = motion_def[i, 8]       # gps visibility
         # get command of this segment
         '''if i == 2:
             print("haha")'''
@@ -459,9 +459,9 @@ def acc_gen(fs, ref_a, acc_err, vib_def=None):
                 x, y and z axis. units: m/s2.
             'type' == 'psd'. Single sided PSD.
                 'freq':  frequency, in unit of Hz
-                'x': x axis, in unit of m2/s4/Hz.
-                'y': y axis, in unit of m2/s4/Hz.
-                'z': z axis, in unit of m2/s4/Hz.
+                'x': x axis, in unit of (m/s^2)^2/Hz.
+                'y': y axis, in unit of (m/s^2)^2/Hz.
+                'z': z axis, in unit of (m/s^2)^2/Hz.
     Returns:
         a_mea: nx3 measured acc data
     """
@@ -500,7 +500,7 @@ def acc_gen(fs, ref_a, acc_err, vib_def=None):
     a_mea = ref_a + acc_bias + acc_bias_drift + acc_noise + acc_vib
     return a_mea
 
-def gyro_gen(fs, ref_w, gyro_err):
+def gyro_gen(fs, ref_w, gyro_err, vib_def=None):
     """
     Add error to true gyro data according to gyroscope model parameters
     Args:
@@ -510,6 +510,20 @@ def gyro_gen(fs, ref_w, gyro_err):
             'b': 3x1 constant gyro bias, rad/s.
             'b_drift': 3x1 gyro bias drift, rad/s.
             'arw': 3x1 angle random walk, rad/s/root-Hz.
+        vib_def: Vibration model and parameters. Vibration type can be random, sinunoida or
+            specified by single-sided PSD.
+            Generated vibrating acc is expressed in the body frame.
+            'type' == 'random':
+                Normal distribution. 'x', 'y' and 'z' give the 1sigma values along x, y and z axis.
+                units: rad/s
+            'type' == 'sinunoidal'
+                Sinunoidal vibration. 'x', 'y' and 'z' give the amplitude of the sine wave along
+                x, y and z axis. units: rad/s.
+            'type' == 'psd'. Single sided PSD.
+                'freq':  frequency, in unit of Hz
+                'x': x axis, in unit of (rad/s)^2/Hz.
+                'y': y axis, in unit of (rad/s)^2/Hz.
+                'z': z axis, in unit of (rad/s)^2/Hz.
     Returns:
         w_mea: nx3 measured gyro data
     """
@@ -519,15 +533,33 @@ def gyro_gen(fs, ref_w, gyro_err):
     ## simulate sensor error
     # static bias
     gyro_bias = gyro_err['b']
-    # bias drift Todo: first-order Gauss-Markov model
+    # bias drift
     gyro_bias_drift = bias_drift(gyro_err['b_corr'], gyro_err['b_drift'], n, fs)
+    # vibrating gyro
+    gyro_vib = np.zeros((n, 3))
+    if vib_def is not None:
+        if vib_def['type'].lower() == 'psd':
+            gyro_vib[:, 0] = time_series_from_psd.time_series_from_psd(vib_def['x'],
+                                                                       vib_def['freq'], fs, n)[1]
+            gyro_vib[:, 1] = time_series_from_psd.time_series_from_psd(vib_def['y'],
+                                                                       vib_def['freq'], fs, n)[1]
+            gyro_vib[:, 2] = time_series_from_psd.time_series_from_psd(vib_def['z'],
+                                                                       vib_def['freq'], fs, n)[1]
+        elif vib_def['type'] == 'random':
+            gyro_vib[:, 0] = vib_def['x'] * np.random.randn(n)
+            gyro_vib[:, 1] = vib_def['y'] * np.random.randn(n)
+            gyro_vib[:, 2] = vib_def['z'] * np.random.randn(n)
+        elif vib_def['type'] == 'sinusoidal':
+            gyro_vib[:, 0] = vib_def['x'] * np.sin(2.0*math.pi*vib_def['freq']*dt*np.arange(n) + np.random.rand(1)*2*math.pi)
+            gyro_vib[:, 1] = vib_def['y'] * np.sin(2.0*math.pi*vib_def['freq']*dt*np.arange(n) + np.random.rand(1)*2*math.pi)
+            gyro_vib[:, 2] = vib_def['z'] * np.sin(2.0*math.pi*vib_def['freq']*dt*np.arange(n) + np.random.rand(1)*2*math.pi)
     # gyroscope white noise
     gyro_noise = np.random.randn(n, 3)
     gyro_noise[:, 0] = gyro_err['arw'][0] / math.sqrt(dt) * gyro_noise[:, 0]
     gyro_noise[:, 1] = gyro_err['arw'][1] / math.sqrt(dt) * gyro_noise[:, 1]
     gyro_noise[:, 2] = gyro_err['arw'][2] / math.sqrt(dt) * gyro_noise[:, 2]
     # true + constant_bias + bias_drift + noise
-    w_mea = ref_w + gyro_bias + gyro_bias_drift + gyro_noise
+    w_mea = ref_w + gyro_bias + gyro_bias_drift + gyro_noise + gyro_vib
     return w_mea
 
 def bias_drift(corr_time, drift, n, fs):
@@ -549,7 +581,9 @@ def bias_drift(corr_time, drift, n, fs):
         if not math.isinf(corr_time[i]):
             # First-order Gauss-Markov
             a = 1 - 1/fs/corr_time[i]
-            b = 1/fs*drift[i]
+            # For the following equation, see issue #19 and
+            # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3812568/ (Eq. 3).
+            b = drift[i] * np.sqrt(1.0 - np.exp(-2/(fs * corr_time[i])))
             #sensor_bias_drift[0, :] = np.random.randn(3) * drift
             drift_noise = np.random.randn(n, 3)
             for j in range(1, n):
@@ -577,13 +611,14 @@ def gps_gen(ref_gps, gps_err, gps_type=0):
     '''
     # total data count
     n = ref_gps.shape[0]
+    pos_err = gps_err['stdp'].copy()
     # If position is in the form of LLA, convert gps_err['stdp'] to LLA error
     if gps_type == 0:   # GPS is in the form of LLA, stdp meter to rad
-        earth_param = geoparams.geo_param(ref_gps[0, 1:4])
-        gps_err['stdp'][0] = gps_err['stdp'][0] / earth_param[0]
-        gps_err['stdp'][1] = gps_err['stdp'][1] / earth_param[1] / earth_param[4]
+        earth_param = geoparams.geo_param(ref_gps[0, 0:3])
+        pos_err[0] = pos_err[0] / earth_param[0]
+        pos_err[1] = pos_err[1] / earth_param[1] / earth_param[4]
     ## simulate GPS error
-    pos_noise = gps_err['stdp'] * np.random.randn(n, 3)
+    pos_noise = pos_err * np.random.randn(n, 3)
     vel_noise = gps_err['stdv'] * np.random.randn(n, 3)
     gps_mea = np.hstack([ref_gps[:, 0:3] + pos_noise,
                          ref_gps[:, 3:6] + vel_noise])
